@@ -129,7 +129,9 @@ async function runJob(job) {
       for (const use of toolUses) {
         if (ctl.stopped) throw new Error('Stopped by you.');
         const tool = tools[use.name];
-        const shown = use.input?.url || use.input?.name || JSON.stringify(use.input || {});
+        const input = use.input || {};
+        const shown =
+          input.url || input.name || (Object.keys(input).length ? JSON.stringify(input) : use.name === 'read_note' ? 'All notes' : '');
         addStep(job, { kind: 'tool', label: tool?.label || use.name, detail: shown });
         let output;
         let isError = false;

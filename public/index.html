@@ -88,6 +88,7 @@
   .k-result .step-detail, .k-error .step-detail { font: 12px/1.45 var(--mono); max-height: 160px; overflow: auto; background: var(--panel-2); padding: 8px; border-radius: 8px; margin-top: 4px; }
   .result { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 14px; }
   .result a, .note a { color: var(--accent); }
+  .result b.h, .note b.h { display: inline-block; font-size: 17px; margin-top: 4px; }
   .error { color: var(--bad); margin-top: 12px; }
   .note { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; }
   .login { max-width: 380px; margin: 18vh auto 0; }
@@ -156,6 +157,20 @@
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const linkify = (s) => esc(s).replace(/https?:\/\/[^\s<)\]]+/g, (u) => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
+  // Light markdown for answers and notes: [text](url), bare links, **bold**, headings, bullet points.
+  function md(s) {
+    const links = [];
+    let out = esc(s).replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, text, url) => {
+      links.push(`<a href="${url}" target="_blank" rel="noopener">${text}</a>`);
+      return `\u0000${links.length - 1}\u0000`;
+    });
+    out = out
+      .replace(/https?:\/\/[^\s<)\]]+/g, (u) => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`)
+      .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
+      .replace(/^#{1,4} +(.+)$/gm, '<b class="h">$1</b>')
+      .replace(/^[-*] +/gm, '• ');
+    return out.replace(/\u0000(\d+)\u0000/g, (_, i) => links[i]);
+  }
   const money = (n) => '$' + (n || 0).toFixed(n > 0 && n < 0.01 ? 4 : 2);
   const when = (iso) => iso ? new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
   const toast = (msg) => { const t = $('toast'); t.textContent = msg; t.classList.remove('hidden'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.add('hidden'), 3500); };
@@ -219,7 +234,7 @@
       <div class="stats"><span>Cost <b>${money(j.costUsd)}</b></span><span>Tokens <b>${(j.inputTokens + j.outputTokens).toLocaleString()}</b></span>
         <span>Searches <b>${j.searches}</b></span><span>Time <b>${secs}s</b></span><span>${esc(j.model)}</span></div>
       ${j.steps.length ? `<ul class="steps">${j.steps.map((s) => `<li class="k-${s.kind}"><div class="step-label">${esc(s.label)}</div><div class="step-detail">${linkify(s.detail)}</div></li>`).join('')}</ul>` : (active ? '<p class="hint">Waiting for the first step…</p>' : '')}
-      ${j.result ? `<div class="card result">${linkify(j.result)}</div>` : ''}
+      ${j.result ? `<div class="card result">${md(j.result)}</div>` : ''}
       ${j.error ? `<div class="error">${esc(j.error)}</div>` : ''}`;
     const stop = $('stop');
     if (stop) stop.onclick = async () => { stop.disabled = true; try { await api(`/api/jobs/${id}/stop`, { method: 'POST' }); toast('Stopping…'); } catch (e) { toast(e.message); } };
@@ -236,7 +251,7 @@
     const n = await api('/api/notes/' + encodeURIComponent(name));
     openNote = name;
     $('home').classList.add('hidden'); $('detail').classList.remove('hidden');
-    $('detail-body').innerHTML = `<h2>${esc(n.name)}</h2><div class="card note">${linkify(n.content)}</div>`;
+    $('detail-body').innerHTML = `<h2>${esc(n.name)}</h2><div class="card note">${md(n.content)}</div>`;
   }
 
   function showJob(id) {
