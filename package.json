@@ -1,0 +1,15 @@
+{
+  "name": "agent-station",
+  "version": "0.1.0",
+  "description": "A small personal AI agent workspace: send tasks, watch the agent work, see what each run costs.",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/run-test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

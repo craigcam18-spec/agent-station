@@ -1,0 +1,15 @@
+[Unit]
+Description=Agent Station
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=craigcam18
+WorkingDirectory=/home/craigcam18/agent-station
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+MemoryMax=300M
+
+[Install]
+WantedBy=multi-user.target
