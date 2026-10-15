@@ -2,7 +2,27 @@
 
 A small personal AI agent workspace. You give it a task from a web page (works on iPad), a Claude agent works through it using tools, and you can watch every step and see exactly what each run cost.
 
-**Stage 1 (this version):** one agent, a job queue, four tools (web search, read a web page, save a note, read a note), a cost ledger, per-job and daily spending caps, and a stop button.
+**Stage 1:** one agent, a job queue, four tools (web search, read a web page, save a note, read a note), a cost ledger, per-job and daily spending caps, and a stop button.
+
+**Stage 2 (Studio):** a design pipeline for the Etsy print shop.
+
+```
+trends note ──► Designer (Claude) writes briefs + image prompts
+                    │
+                    ▼
+               Image model (Google Nano Banana 2, 2K) draws each one
+                    │
+                    ▼
+               Judge (a separate Claude, sees full view + full-res crop)
+               scores quality / sellability / originality, checks text and IP risk
+                    │
+          pass ◄────┼────► revise: designer rewrites prompt, redraw (once)
+                    │
+                    ▼
+               reject (weak concept or brand/character risk)
+```
+
+A design passes only if the judge says pass, every score is at least `JUDGE_MIN_SCORE` (default 7), there are no text problems, and IP risk is "none". Passed designs wait in the Studio tab, ready for listing (stage 3).
 
 ## How it works
 
@@ -18,14 +38,17 @@ iPad dashboard  ──►  server.js (API + job queue)  ──►  agent.js (the
 | File | What it does |
 |---|---|
 | `server.js` | Serves the dashboard and the API, runs one job at a time |
-| `agent.js` | The agent loop, cost tracking, budget and step limits |
-| `tools.js` | The tools. Add new ones here (copy an existing block) |
-| `store.js` | The job ledger, saved to `data/jobs.json` |
+| `agent.js` | The agent loop, budget and step limits; hands design jobs to the Studio |
+| `claude.js` | Calls the Claude API and adds up costs |
+| `studio.js` | Designer and judge prompts, the draw → judge → revise loop |
+| `images.js` | Google image generation and resizing (thumbnails, judge previews) |
+| `tools.js` | The agent's tools. Add new ones here (copy an existing block) |
+| `store.js` | Job ledger (`data/jobs.json`) and designs (`data/designs.json`, images in `data/designs/`) |
 | `config.js` | Reads settings from `.env`, model prices |
 | `public/index.html` | The dashboard |
-| `test/run-test.js` | End-to-end test against a fake Claude API (free, no key needed) |
+| `test/` | End-to-end tests against fake Claude and Google APIs (free, no keys needed) |
 
-No npm packages are needed, just Node 20 or newer.
+Needs Node 20 or newer and one package, `sharp` (image resizing): run `npm install` after cloning or pulling.
 
 ## Set up on the Google Cloud VM (from the iPad)
 
@@ -84,6 +107,40 @@ http://gold-bot-vm:8787
 
 (If that name doesn't work, use the `100.x.x.x` address from `tailscale ip -4`.) In Safari, Share → Add to Home Screen makes it feel like an app.
 
+## Turn on the Studio (Google image generation)
+
+The Studio draws images with Google's models on Vertex AI, billed to the Google Cloud project (so the free trial credit covers it). The VM logs in to Google as itself, so there are no extra keys, but it needs two switches flipped in the Google Cloud console:
+
+**1. Enable the API.** Search the console for **Vertex AI API** and press **Enable**.
+
+**2. Let the VM use it.** The VM's default "access scopes" block AI APIs. Changing them needs the VM stopped for a minute, which pauses the trading bot too.
+- Compute Engine → VM instances → `gold-bot-vm` → **Stop**, and wait until it shows stopped
+- **Edit** → Security and access → **Access scopes** → choose **Allow full access to all Cloud APIs** → **Save**
+- **Start** the VM
+
+Agent Station and Tailscale start again by themselves. Check the trading bot came back too.
+
+**3. Update the code** (SSH in again):
+
+```bash
+cd ~/agent-station && git pull && npm install && npm test && sudo systemctl restart agent-station
+```
+
+If a design run fails with a permissions message, add the role **Vertex AI User** to the VM's service account (IAM & Admin → IAM → the account ending `compute@developer.gserviceaccount.com` → edit → add role).
+
+Studio settings in `.env` (all optional):
+
+| Setting | Default | What it does |
+|---|---|---|
+| `IMAGE_MODEL` | `gemini-3.1-flash-image` | `gemini-nano-banana-2.1` is cheaper; `gemini-3-pro-image` is the top model |
+| `IMAGE_SIZE` | `2K` | `1K`, `2K` or `4K`. 4K costs more but prints larger |
+| `DESIGN_RUN_BUDGET_USD` | `2.00` | A design run stops once it has spent this |
+| `MAX_DESIGNS_PER_RUN` | `6` | Most designs in one run |
+| `MAX_REVISIONS` | `1` | Redraws allowed after the judge says revise |
+| `JUDGE_MIN_SCORE` | `7` | Lowest score a design can have and still pass |
+
+Image cost per picture (Google's prices): Nano Banana 2 is about $0.07 at 1K, $0.10 at 2K and $0.15 at 4K. With Claude's designer and judge on top, a design costs roughly $0.13 to $0.26 depending on whether it needs a redraw. Image costs come out of the Google credit, Claude costs out of the Anthropic credit, and the dashboard shows both together.
+
 ## Useful commands
 
 ```bash
@@ -103,6 +160,6 @@ Safety limits (change in `.env`):
 
 ## Next stages
 
-2. Scheduled routines (for example, "every Monday, find new print trends")
-3. Several agents passing work along conveyor-style workflows
-4. The pixel-art station view
+3. Lister: titles, tags and descriptions, then publish to Etsy through Printify
+4. Scheduled routines (for example, "every Monday, refresh trends and make a batch")
+5. The pixel-art station view

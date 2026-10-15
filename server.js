@@ -8,6 +8,7 @@ const config = require('./config');
 const store = require('./store');
 const agent = require('./agent');
 const { tools, listNotes, readNote } = require('./tools');
+const { imagePath, imagePrice } = require('./images');
 
 if (!config.password || config.password.length < 8) {
   console.error('Set APP_PASSWORD in .env (at least 8 characters) before starting.');
@@ -81,6 +82,7 @@ const summary = (j) => ({
   finishedAt: j.finishedAt,
   costUsd: j.costUsd,
   steps: j.steps.length,
+  kind: j.kind || 'agent',
 });
 
 const INDEX = path.join(__dirname, 'public', 'index.html');
@@ -112,6 +114,15 @@ const server = http.createServer(async (req, res) => {
         busy,
         queued: queue.length,
         hasApiKey: Boolean(config.apiKey),
+        studio: {
+          imageModel: config.imageModel,
+          imageSize: config.imageSize,
+          imagePrice: imagePrice(),
+          runBudget: config.designBudget,
+          maxDesigns: config.maxDesignsPerRun,
+          maxRevisions: config.maxRevisions,
+          minScore: config.judgeMinScore,
+        },
       });
     }
 
@@ -148,6 +159,67 @@ const server = http.createServer(async (req, res) => {
         store.save();
       } else {
         agent.stopJob(job.id);
+      }
+      return send(res, 200, { ok: true });
+    }
+
+    // ---- Studio ----
+    if (req.method === 'POST' && p === '/api/designs/run') {
+      const { count, theme } = await readBody(req);
+      const n = Math.max(1, Math.min(config.maxDesignsPerRun, parseInt(count, 10) || 3));
+      const t = String(theme || '').trim().slice(0, 500);
+      const job = store.create(`Design ${n} print${n > 1 ? 's' : ''}${t ? `: ${t}` : ' from the trends note'}`, {
+        kind: 'design',
+        params: { count: n, theme: t },
+      });
+      enqueue(job);
+      return send(res, 201, summary(job));
+    }
+
+    if (req.method === 'GET' && p === '/api/designs') {
+      return send(
+        res,
+        200,
+        store.listDesigns().slice(0, 120).map((d) => {
+          const last = d.attempts[d.attempts.length - 1];
+          const shown = [...d.attempts].reverse().findIndex((a) => !a.error);
+          return {
+            id: d.id,
+            title: d.title,
+            status: d.status,
+            createdAt: d.createdAt,
+            costUsd: d.costUsd,
+            attempts: d.attempts.length,
+            image: shown === -1 ? null : d.attempts.length - 1 - shown,
+            verdict: last?.verdict || null,
+          };
+        })
+      );
+    }
+
+    m = p.match(/^\/api\/designs\/([a-f0-9]+)$/);
+    if (req.method === 'GET' && m) {
+      const d = store.getDesign(m[1]);
+      return d ? send(res, 200, d) : send(res, 404, { error: 'No such design' });
+    }
+
+    m = p.match(/^\/api\/designs\/([a-f0-9]+)\/image\/(\d+)\/(thumb|preview|full)$/);
+    if (req.method === 'GET' && m) {
+      const file = imagePath(m[1], Number(m[2]), m[3]);
+      if (!store.getDesign(m[1]) || !file || !fs.existsSync(file)) return send(res, 404, { error: 'No such image' });
+      const type = { thumb: 'image/webp', preview: 'image/jpeg', full: 'image/png' }[m[3]];
+      res.writeHead(200, { 'content-type': type, 'cache-control': 'private, max-age=86400' });
+      return fs.createReadStream(file).pipe(res);
+    }
+
+    m = p.match(/^\/api\/designs\/([a-f0-9]+)\/reject$/);
+    if (req.method === 'POST' && m) {
+      const d = store.getDesign(m[1]);
+      if (!d) return send(res, 404, { error: 'No such design' });
+      if (d.status === 'passed') {
+        d.status = 'rejected';
+        d.reason = 'Binned by you.';
+        store.saveDesigns();
       }
       return send(res, 200, { ok: true });
     }

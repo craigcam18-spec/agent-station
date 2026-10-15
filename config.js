@@ -50,5 +50,18 @@ module.exports = {
   webSearch: (process.env.WEB_SEARCH || 'on') !== 'off',
   webSearchPrice: 0.01, // $10 per 1,000 searches
   timezone: process.env.TIMEZONE || 'Europe/London',
+
+  // ---- Studio: design + judge ----
+  // Google image model on Vertex AI, billed to the Google Cloud project.
+  imageModel: process.env.IMAGE_MODEL || 'gemini-3.1-flash-image',
+  imageSize: process.env.IMAGE_SIZE || '2K', // 1K, 2K or 4K
+  imageAspect: process.env.IMAGE_ASPECT || '3:4', // 3:4 fits 12x16 and 18x24 prints
+  gcpProject: process.env.GCP_PROJECT || '', // blank = read from the VM
+  googleApiBase: (process.env.GOOGLE_API_BASE || 'https://aiplatform.googleapis.com').replace(/\/$/, ''),
+  gcpMetadataUrl: (process.env.GCP_METADATA_URL || 'http://metadata.google.internal').replace(/\/$/, ''),
+  designBudget: num('DESIGN_RUN_BUDGET_USD', 2),
+  maxDesignsPerRun: num('MAX_DESIGNS_PER_RUN', 6),
+  maxRevisions: num('MAX_REVISIONS', 1),
+  judgeMinScore: num('JUDGE_MIN_SCORE', 7),
   dataDir: process.env.DATA_DIR || path.join(__dirname, 'data'),
 };

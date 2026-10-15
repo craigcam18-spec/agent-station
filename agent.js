@@ -3,6 +3,7 @@
 const config = require('./config');
 const store = require('./store');
 const { tools } = require('./tools');
+const { callClaude, addUsage } = require('./claude');
 
 const running = new Map(); // job id -> { stopped, abort }
 
@@ -29,49 +30,21 @@ function toolList() {
   return list;
 }
 
-async function callClaude(messages, signal) {
-  const res = await fetch(`${config.baseUrl}/v1/messages`, {
-    method: 'POST',
-    signal,
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': config.apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: config.model,
-      max_tokens: config.maxTokens,
-      system: systemPrompt(),
-      tools: toolList(),
-      messages,
-    }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`Claude API error ${res.status}: ${data?.error?.message || res.statusText}`);
-  return data;
-}
-
-function addUsage(job, usage = {}) {
-  const p = config.price;
-  const input = usage.input_tokens || 0;
-  const cacheWrite = usage.cache_creation_input_tokens || 0;
-  const cacheRead = usage.cache_read_input_tokens || 0;
-  const output = usage.output_tokens || 0;
-  const searches = usage.server_tool_use?.web_search_requests || 0;
-  job.inputTokens += input + cacheWrite + cacheRead;
-  job.outputTokens += output;
-  job.searches += searches;
-  job.costUsd +=
-    (input * p.input + cacheWrite * p.cacheWrite + cacheRead * p.cacheRead + output * p.output) / 1e6 +
-    searches * config.webSearchPrice;
-}
-
 function addStep(job, step) {
   job.steps.push({ at: new Date().toISOString(), ...step });
   store.save();
 }
 
 const clip = (s, n = 1500) => (s.length > n ? s.slice(0, n) + '…' : s);
+
+// Throws if the job has been stopped or has hit its budget, the daily budget or the step limit.
+function checkLimits(job, ctl, budget, step) {
+  if (ctl.stopped) throw new Error('Stopped by you.');
+  if (step !== undefined && step > config.maxSteps) throw new Error(`Reached the step limit (${config.maxSteps}).`);
+  if (job.costUsd >= budget) throw new Error(`Reached this job's budget ($${budget.toFixed(2)}).`);
+  if (store.spentToday() >= config.dailyBudget)
+    throw new Error(`Reached today's budget ($${config.dailyBudget.toFixed(2)}).`);
+}
 
 async function runJob(job) {
   const ctl = { stopped: false, abort: new AbortController() };
@@ -80,20 +53,35 @@ async function runJob(job) {
   job.startedAt = new Date().toISOString();
   store.save();
 
-  const messages = [{ role: 'user', content: job.task }];
-
   try {
     if (!config.apiKey) throw new Error('No ANTHROPIC_API_KEY set in .env');
+    if (job.kind === 'design') {
+      await require('./studio').runDesignJob(job, ctl, { addStep, checkLimits });
+    } else {
+      await runAgent(job, ctl);
+    }
+  } catch (err) {
+    job.status = ctl.stopped ? 'stopped' : 'failed';
+    job.error = ctl.stopped ? 'Stopped by you.' : err.message;
+  } finally {
+    job.finishedAt = new Date().toISOString();
+    running.delete(job.id);
+    store.save();
+  }
+}
 
-    for (let step = 1; ; step++) {
-      if (ctl.stopped) throw new Error('Stopped by you.');
-      if (step > config.maxSteps) throw new Error(`Reached the step limit (${config.maxSteps}).`);
-      if (job.costUsd >= config.jobBudget)
-        throw new Error(`Reached this job's budget ($${config.jobBudget.toFixed(2)}).`);
-      if (store.spentToday() >= config.dailyBudget)
-        throw new Error(`Reached today's budget ($${config.dailyBudget.toFixed(2)}).`);
+async function runAgent(job, ctl) {
+  const messages = [{ role: 'user', content: job.task }];
+  for (let step = 1; ; step++) {
+    {
+      checkLimits(job, ctl, config.jobBudget, step);
 
-      const reply = await callClaude(messages, ctl.abort.signal);
+      const reply = await callClaude({
+        system: systemPrompt(),
+        tools: toolList(),
+        messages,
+        signal: ctl.abort.signal,
+      });
       addUsage(job, reply.usage);
       const content = reply.content || [];
       messages.push({ role: 'assistant', content });
@@ -147,13 +135,6 @@ async function runJob(job) {
       }
       messages.push({ role: 'user', content: results });
     }
-  } catch (err) {
-    job.status = ctl.stopped ? 'stopped' : 'failed';
-    job.error = ctl.stopped ? 'Stopped by you.' : err.message;
-  } finally {
-    job.finishedAt = new Date().toISOString();
-    running.delete(job.id);
-    store.save();
   }
 }
 

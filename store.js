@@ -38,9 +38,11 @@ function localDay(iso) {
   return new Date(iso).toLocaleDateString('en-CA', { timeZone: config.timezone });
 }
 
-function create(task) {
+function create(task, extra = {}) {
   const job = {
     id: crypto.randomBytes(6).toString('hex'),
+    kind: extra.kind || 'agent',
+    params: extra.params || null,
     task,
     status: 'queued',
     createdAt: new Date().toISOString(),
@@ -70,4 +72,63 @@ function spentToday() {
     .reduce((sum, j) => sum + j.costUsd, 0);
 }
 
-module.exports = { create, get, list, save, flush, spentToday };
+// ---- Designs made by the Studio (data/designs.json; images live in data/designs/) ----
+const DESIGNS_FILE = path.join(config.dataDir, 'designs.json');
+let designs = [];
+try {
+  designs = JSON.parse(fs.readFileSync(DESIGNS_FILE, 'utf8'));
+} catch {
+  designs = [];
+}
+for (const d of designs) {
+  if (d.status === 'generating' || d.status === 'judging' || d.status === 'revising') {
+    d.status = 'rejected';
+    d.reason = 'The server restarted before this design was finished.';
+  }
+}
+
+function flushDesigns() {
+  const tmp = DESIGNS_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(designs, null, 1));
+  fs.renameSync(tmp, DESIGNS_FILE);
+}
+let designTimer = null;
+function saveDesigns() {
+  clearTimeout(designTimer);
+  designTimer = setTimeout(flushDesigns, 250);
+}
+
+function createDesign(fields) {
+  const design = {
+    id: crypto.randomBytes(6).toString('hex'),
+    createdAt: new Date().toISOString(),
+    status: 'generating',
+    attempts: [],
+    costUsd: 0,
+    reason: null,
+    ...fields,
+  };
+  designs.unshift(design);
+  saveDesigns();
+  return design;
+}
+const getDesign = (id) => designs.find((d) => d.id === id);
+const listDesigns = () => designs;
+
+function flushAll() {
+  flush();
+  flushDesigns();
+}
+
+module.exports = {
+  create,
+  get,
+  list,
+  save,
+  flush: flushAll,
+  spentToday,
+  createDesign,
+  getDesign,
+  listDesigns,
+  saveDesigns,
+};

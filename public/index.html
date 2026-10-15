@@ -92,6 +92,32 @@
   .error { color: var(--bad); margin-top: 12px; }
   .note { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; }
   .login { max-width: 380px; margin: 18vh auto 0; }
+  select { font: 16px var(--sans); color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; min-height: 40px; }
+  #design-form input { margin-top: 10px; }
+  .studio-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .filters { display: flex; gap: 6px; margin: 14px 0 10px; }
+  .chip { background: transparent; color: var(--muted); border: 1px solid var(--line); padding: 6px 12px; min-height: 34px; font-size: 13px; border-radius: 99px; }
+  .chip.on { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .tile { display: flex; flex-direction: column; justify-content: flex-start; padding: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; text-align: left; color: var(--text); font-weight: 400; }
+  .tile .img { aspect-ratio: 3 / 4; background: var(--panel-2); display: grid; place-items: center; color: var(--muted); font: 12px var(--mono); }
+  .tile img, .shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .tile .cap { padding: 8px 10px 10px; }
+  .tile .t { font-size: 13px; line-height: 1.3; margin-top: 6px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .s-passed { color: var(--ok); } .s-rejected { color: var(--bad); } .s-generating, .s-judging, .s-revising { color: var(--run); }
+  .s-generating::before, .s-judging::before, .s-revising::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 6px; vertical-align: 1px; animation: blink 1s infinite; }
+  .design-top { display: grid; gap: 16px; margin-top: 14px; }
+  @media (min-width: 700px) { .design-top { grid-template-columns: 300px 1fr; } }
+  .shot { aspect-ratio: 3 / 4; border-radius: 12px; overflow: hidden; background: var(--panel-2); border: 1px solid var(--line); }
+  .scores { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
+  .score { background: var(--panel-2); border-radius: 10px; padding: 8px; text-align: center; }
+  .score b { display: block; font: 700 22px var(--mono); }
+  .score span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .attempt { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
+  .attempt ul { margin: 6px 0; padding-left: 18px; color: #c9d2e8; font-size: 14px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 6px; }
+  details p { white-space: pre-wrap; font-size: 13px; color: #c9d2e8; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
   .hidden { display: none !important; }
   .toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line); padding: 10px 16px; border-radius: 10px; font-size: 14px; max-width: calc(100% - 32px); }
 </style>
@@ -134,10 +160,31 @@
 
       <div class="tabs">
         <button class="tab on" data-tab="jobs" type="button">Jobs</button>
+        <button class="tab" data-tab="studio" type="button">Studio</button>
         <button class="tab" data-tab="notes" type="button">Notes</button>
       </div>
       <div id="jobs" class="list"></div>
       <div id="notes" class="list hidden"></div>
+      <div id="studio" class="hidden">
+        <form id="design-form" class="card">
+          <div class="studio-head"><b>Make designs</b><span class="hint" id="studio-cost"></span></div>
+          <div class="row">
+            <label class="hint" for="count">How many</label>
+            <select id="count"></select>
+          </div>
+          <input id="theme" placeholder="Theme (optional). Leave blank to use your trends note.">
+          <div class="row">
+            <span class="hint grow">Designer drafts → image model draws → judge scores → one redraw if needed</span>
+            <button type="submit" id="make">Make</button>
+          </div>
+        </form>
+        <div class="filters" id="filters">
+          <button class="chip on" data-f="all" type="button">All</button>
+          <button class="chip" data-f="passed" type="button">Passed</button>
+          <button class="chip" data-f="rejected" type="button">Rejected</button>
+        </div>
+        <div id="gallery" class="gallery"></div>
+      </div>
     </section>
 
     <section id="detail" class="detail hidden">
@@ -200,8 +247,11 @@
     try {
       const [status, jobs] = await Promise.all([api('/api/status'), api('/api/jobs')]);
       renderStatus(status);
+      setupStudio(status);
       if (openJob) await renderJob(openJob);
+      else if (openDesign) await renderDesign(openDesign);
       else if (tab === 'jobs') renderJobs(jobs);
+      else if (tab === 'studio') await renderDesigns();
     } catch (e) { if (e.message !== 'Wrong password') console.warn(e); }
   }
 
@@ -255,20 +305,139 @@
   }
 
   function showJob(id) {
-    openJob = id;
+    openJob = id; openDesign = null;
     $('home').classList.add('hidden'); $('detail').classList.remove('hidden');
     $('detail-body').innerHTML = '<p class="hint">Loading…</p>';
     renderJob(id).catch((e) => toast(e.message));
     window.scrollTo(0, 0);
   }
 
-  $('back').onclick = () => { openJob = null; openNote = null; $('detail').classList.add('hidden'); $('home').classList.remove('hidden'); refresh(); if (tab === 'notes') renderNotes(); };
+  // ---------- Studio ----------
+  let openDesign = null, filter = 'all', studioReady = false;
+  const blobs = new Map(); // image path -> object URL (images need the password header, so fetch them)
+  async function loadImg(el) {
+    const src = el.dataset.src;
+    if (!blobs.has(src)) {
+      blobs.set(src, fetch(src, { headers: { 'x-station-key': key } })
+        .then((r) => r.ok ? r.blob() : Promise.reject()).then((b) => URL.createObjectURL(b)).catch(() => { blobs.delete(src); return null; }));
+    }
+    const url = await blobs.get(src);
+    if (url && el.isConnected) el.src = url;
+  }
+  const hydrate = (root) => root.querySelectorAll('img[data-src]').forEach(loadImg);
+  const imgUrl = (id, n, v) => `/api/designs/${id}/image/${n}/${v}`;
+  const avg = (v) => v ? Math.round((v.print_quality + v.sellability + v.originality) / 3 * 10) / 10 : null;
+
+  function setupStudio(s) {
+    if (studioReady || !s.studio) return;
+    studioReady = true;
+    const st = s.studio;
+    $('count').innerHTML = Array.from({ length: st.maxDesigns }, (_, i) => `<option${i === 2 ? ' selected' : ''}>${i + 1}</option>`).join('');
+    const per = st.imagePrice + 0.03;
+    $('studio-cost').textContent = `≈ ${money(per)}–${money(per * (st.maxRevisions + 1))} per design · ${st.imageModel} ${st.imageSize}`;
+  }
+
+  async function renderDesigns() {
+    const all = await api('/api/designs');
+    const list = filter === 'all' ? all : all.filter((d) => d.status === filter);
+    const g = $('gallery');
+    const sig = filter + JSON.stringify(list);
+    if (g.dataset.sig === sig) return;
+    g.dataset.sig = sig;
+    g.innerHTML = list.length ? list.map((d) => `
+      <button class="tile" type="button" data-design="${d.id}">
+        <div class="img">${d.image !== null ? `<img alt="" data-src="${imgUrl(d.id, d.image, 'thumb')}">` : (d.status === 'rejected' ? 'no image' : 'drawing…')}</div>
+        <div class="cap"><span class="pill s-${d.status}">${d.status}</span>${d.verdict ? ` <span class="meta">${avg(d.verdict)}/10</span>` : ''}
+          <div class="t">${esc(d.title)}</div></div>
+      </button>`).join('') : `<div class="empty" style="grid-column:1/-1">${all.length ? 'Nothing here with that filter.' : 'No designs yet. Make your first batch above.'}</div>`;
+    hydrate(g);
+  }
+
+  async function renderDesign(id) {
+    const d = await api('/api/designs/' + id);
+    const body = $('detail-body');
+    const sig = JSON.stringify(d);
+    if (body.dataset.sig === sig) return;
+    body.dataset.sig = sig;
+    const shownIdx = d.attempts.map((a, i) => (a.error ? -1 : i)).filter((i) => i >= 0).pop();
+    const last = shownIdx !== undefined ? d.attempts[shownIdx] : null;
+    const v = last?.verdict;
+    $('detail-body').innerHTML = `
+      <div class="design-top">
+        <div class="shot">${last ? `<img alt="${esc(d.title)}" data-src="${imgUrl(d.id, shownIdx, 'preview')}">` : ''}</div>
+        <div>
+          <span class="pill s-${d.status}">${d.status}</span>
+          <h2>${esc(d.title)}</h2>
+          <div class="hint">${esc(d.theme)}</div>
+          <p>${esc(d.why)}</p>
+          ${d.reason ? `<div class="error">${esc(d.reason)}</div>` : ''}
+          ${v ? `<div class="scores">
+              <div class="score"><b>${v.print_quality}</b><span>Quality</span></div>
+              <div class="score"><b>${v.sellability}</b><span>Sells</span></div>
+              <div class="score"><b>${v.originality}</b><span>Original</span></div></div>
+            <div class="stats"><span>IP risk <b>${esc(v.ip_risk)}</b></span><span>Text issues <b>${v.text_problems ? 'yes' : 'no'}</b></span>
+              <span>Cost <b>${money(d.costUsd)}</b></span>${last.width ? `<span>${last.width}×${last.height}px</span>` : ''}</div>` : ''}
+          <div class="actions">
+            ${last ? `<button class="ghost" id="full" type="button">Open full size</button>` : ''}
+            ${d.status === 'passed' ? `<button class="danger" id="bin" type="button">Bin it</button>` : ''}
+          </div>
+        </div>
+      </div>
+      ${d.attempts.map((a, i) => `
+        <div class="attempt">
+          <div class="step-label">Attempt ${i + 1}${a.outcome ? ` · judge said ${esc(a.outcome)}` : ''}</div>
+          ${a.error ? `<div class="error">${esc(a.error)}</div>` : ''}
+          ${a.verdict ? `<div class="step-detail">${esc(a.verdict.feedback)}</div>
+            ${a.verdict.defects.length ? `<ul>${a.verdict.defects.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}` : ''}
+          <details><summary>Prompt</summary><p>${esc(a.prompt)}</p></details>
+        </div>`).join('')}`;
+    hydrate($('detail-body'));
+    const full = $('full');
+    if (full) full.onclick = async () => {
+      const w = window.open('', '_blank');
+      const res = await fetch(imgUrl(d.id, shownIdx, 'full'), { headers: { 'x-station-key': key } });
+      const url = URL.createObjectURL(await res.blob());
+      if (w) w.location = url; else location.href = url;
+    };
+    const bin = $('bin');
+    if (bin) bin.onclick = async () => { await api(`/api/designs/${d.id}/reject`, { method: 'POST' }); toast('Binned'); body.dataset.sig = ''; renderDesign(d.id); };
+  }
+
+  function showDesign(id) {
+    openDesign = id;
+    $('home').classList.add('hidden'); $('detail').classList.remove('hidden');
+    $('detail-body').dataset.sig = '';
+    $('detail-body').innerHTML = '<p class="hint">Loading…</p>';
+    renderDesign(id).catch((e) => toast(e.message));
+    window.scrollTo(0, 0);
+  }
+
+  $('gallery').onclick = (e) => { const b = e.target.closest('[data-design]'); if (b) showDesign(b.dataset.design); };
+  $('filters').onclick = (e) => {
+    const c = e.target.closest('[data-f]'); if (!c) return;
+    filter = c.dataset.f;
+    $('gallery').dataset.sig = '';
+    document.querySelectorAll('.chip').forEach((x) => x.classList.toggle('on', x === c));
+    renderDesigns().catch((er) => toast(er.message));
+  };
+  $('design-form').onsubmit = async (e) => {
+    e.preventDefault();
+    $('make').disabled = true;
+    try {
+      const job = await api('/api/designs/run', { method: 'POST', body: JSON.stringify({ count: $('count').value, theme: $('theme').value }) });
+      $('theme').value = '';
+      showJob(job.id);
+    } catch (err) { toast(err.message); }
+    finally { $('make').disabled = false; }
+  };
+
+  $('back').onclick = () => { openJob = null; openNote = null; openDesign = null; $('detail').classList.add('hidden'); $('home').classList.remove('hidden'); refresh(); if (tab === 'notes') renderNotes(); };
   $('jobs').onclick = (e) => { const b = e.target.closest('[data-job]'); if (b) showJob(b.dataset.job); };
   $('notes').onclick = (e) => { const b = e.target.closest('[data-note]'); if (b) showNote(b.dataset.note).catch((er) => toast(er.message)); };
   document.querySelectorAll('.tab').forEach((t) => t.onclick = () => {
     tab = t.dataset.tab;
     document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x === t));
-    $('jobs').classList.toggle('hidden', tab !== 'jobs'); $('notes').classList.toggle('hidden', tab !== 'notes');
+    $('jobs').classList.toggle('hidden', tab !== 'jobs'); $('notes').classList.toggle('hidden', tab !== 'notes'); $('studio').classList.toggle('hidden', tab !== 'studio');
     if (tab === 'notes') renderNotes().catch((e) => toast(e.message)); else refresh();
   });
 
