@@ -122,6 +122,7 @@ const server = http.createServer(async (req, res) => {
           maxDesigns: config.maxDesignsPerRun,
           maxRevisions: config.maxRevisions,
           minScore: config.judgeMinScore,
+          minOriginality: config.judgeMinOriginality,
         },
       });
     }

@@ -88,11 +88,11 @@ const PROMPT_TOOL = {
 
 // The judge's opinion plus hard rules decide whether a design passes.
 function decide(v) {
-  const lowest = Math.min(v.print_quality, v.sellability, v.originality);
+  const scoresOk =
+    Math.min(v.print_quality, v.sellability) >= config.judgeMinScore && v.originality >= config.judgeMinOriginality;
   if (v.ip_risk === 'clear') return { outcome: 'reject', reason: 'Looks too close to someone else’s brand or character.' };
   if (v.verdict === 'reject') return { outcome: 'reject', reason: v.feedback };
-  if (v.verdict === 'pass' && v.ip_risk === 'none' && !v.text_problems && lowest >= config.judgeMinScore)
-    return { outcome: 'pass' };
+  if (v.verdict === 'pass' && v.ip_risk === 'none' && !v.text_problems && scoresOk) return { outcome: 'pass' };
   return { outcome: 'revise' };
 }
 

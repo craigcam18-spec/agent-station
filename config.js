@@ -62,6 +62,7 @@ module.exports = {
   designBudget: num('DESIGN_RUN_BUDGET_USD', 2),
   maxDesignsPerRun: num('MAX_DESIGNS_PER_RUN', 6),
   maxRevisions: num('MAX_REVISIONS', 1),
-  judgeMinScore: num('JUDGE_MIN_SCORE', 7),
+  judgeMinScore: num('JUDGE_MIN_SCORE', 7), // print quality and sellability
+  judgeMinOriginality: num('JUDGE_MIN_ORIGINALITY', 6), // trend-led designs rarely score 7+ here
   dataDir: process.env.DATA_DIR || path.join(__dirname, 'data'),
 };

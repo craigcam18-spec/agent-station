@@ -22,7 +22,7 @@ trends note ──► Designer (Claude) writes briefs + image prompts
                reject (weak concept or brand/character risk)
 ```
 
-A design passes only if the judge says pass, every score is at least `JUDGE_MIN_SCORE` (default 7), there are no text problems, and IP risk is "none". Passed designs wait in the Studio tab, ready for listing (stage 3).
+A design passes only if the judge says pass, quality and sellability are at least `JUDGE_MIN_SCORE` (default 7), originality is at least `JUDGE_MIN_ORIGINALITY` (default 6), there are no text problems, and IP risk is "none". Passed designs wait in the Studio tab, ready for listing (stage 3).
 
 ## How it works
 
@@ -137,7 +137,8 @@ Studio settings in `.env` (all optional):
 | `DESIGN_RUN_BUDGET_USD` | `2.00` | A design run stops once it has spent this |
 | `MAX_DESIGNS_PER_RUN` | `6` | Most designs in one run |
 | `MAX_REVISIONS` | `1` | Redraws allowed after the judge says revise |
-| `JUDGE_MIN_SCORE` | `7` | Lowest score a design can have and still pass |
+| `JUDGE_MIN_SCORE` | `7` | Lowest print quality and sellability score that can pass |
+| `JUDGE_MIN_ORIGINALITY` | `6` | Lowest originality score that can pass (trend-led designs rarely get 7+) |
 
 Image cost per picture (Google's prices): Nano Banana 2 is about $0.07 at 1K, $0.10 at 2K and $0.15 at 4K. With Claude's designer and judge on top, a design costs roughly $0.13 to $0.26 depending on whether it needs a redraw. Image costs come out of the Google credit, Claude costs out of the Anthropic credit, and the dashboard shows both together.
 

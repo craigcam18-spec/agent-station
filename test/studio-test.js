@@ -262,6 +262,21 @@ const seen = { judgeImages: [], googleAuth: [], revisions: 0 };
     assert.match(job.error, /access scopes/);
   });
 
+  await check('originality has its own lower bar (6); quality and sellability stay at 7', async () => {
+    process.env.JUDGE_MIN_SCORE = '7';
+    process.env.JUDGE_MIN_ORIGINALITY = '6';
+    process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'decide-test-'));
+    const { decide } = require('../studio');
+    const v = (o) => ({ print_quality: 8, sellability: 8, originality: 6, ip_risk: 'none', text_problems: false, verdict: 'pass', feedback: '', defects: [], ...o });
+    assert.strictEqual(decide(v({})).outcome, 'pass'); // the lemon print case
+    assert.strictEqual(decide(v({ originality: 5 })).outcome, 'revise');
+    assert.strictEqual(decide(v({ print_quality: 6 })).outcome, 'revise');
+    assert.strictEqual(decide(v({ sellability: 6 })).outcome, 'revise');
+    assert.strictEqual(decide(v({ verdict: 'revise' })).outcome, 'revise');
+    assert.strictEqual(decide(v({ text_problems: true })).outcome, 'revise');
+    assert.strictEqual(decide(v({ ip_risk: 'clear' })).outcome, 'reject');
+  });
+
   await check('status reports studio settings', async () => {
     const s = (await api('/api/status')).body.studio;
     assert.strictEqual(s.imageModel, 'gemini-3.1-flash-image');
