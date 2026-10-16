@@ -48,6 +48,18 @@ const seen = { judgeImages: [], googleAuth: [], revisions: 0 };
         const prompt = r.contents[0].parts[0].text;
         if (prompt.includes('AUTHFAIL')) return json(403, { error: { message: 'Request had insufficient authentication scopes.' } });
         if (prompt.includes('REFUSE')) return json(200, { candidates: [{ finishReason: 'IMAGE_SAFETY', content: { parts: [] } }] });
+        // Drop the connection mid-reply: once for FLAKY (retry should recover), always for DEAD.
+        if (prompt.includes('DEAD') || (prompt.includes('FLAKY') && !seen.flaked)) {
+          seen.flaked = true;
+          seen.drops = (seen.drops || 0) + 1;
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.write('{"candidates":[{"content":{"parts":[{"inlineData":{"data":"AAAA');
+          return res.destroy();
+        }
+        if (prompt.includes('BUSY') && !seen.busied) {
+          seen.busied = true;
+          return json(503, { error: { message: 'overloaded' } });
+        }
         return json(200, {
           candidates: [{ content: { parts: [{ text: 'Here you go' }, { inlineData: { mimeType: 'image/png', data: png.toString('base64') } }] } }],
         });
@@ -72,6 +84,14 @@ const seen = { judgeImages: [], googleAuth: [], revisions: 0 };
         if (tool === 'submit_briefs') {
           const count = Number(text.match(/exactly (\d+)/)[1]);
           const theme = (text.match(/Theme to design for: ([^\\"]+)/) || [])[1] || 'trends';
+          if (/DEAD/.test(theme)) {
+            return reply({
+              briefs: [
+                { title: 'Dead Print', theme, prompt: 'DEAD connection', why: 'x' },
+                { title: 'Fine Print', theme, prompt: 'fine one', why: 'x' },
+              ].slice(0, count),
+            });
+          }
           const titles = ['Good Print', 'Fixable Print', 'Risky Print', 'Refused Print'];
           return reply({
             briefs: titles.slice(0, count).map((t) => ({ title: t, theme, prompt: `${t} about ${theme}`, why: 'Sells well.' })),
@@ -112,6 +132,7 @@ const seen = { judgeImages: [], googleAuth: [], revisions: 0 };
       HOST: '127.0.0.1',
       DATA_DIR: dataDir,
       DAILY_BUDGET_USD: '10',
+      NET_RETRY_WAITS: '50,50,50',
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
@@ -211,6 +232,27 @@ const seen = { judgeImages: [], googleAuth: [], revisions: 0 };
     assert.strictEqual(job.status, 'done', job.error);
     assert.strictEqual(seen.revisions, 1);
     assert.ok(job.steps.some((s) => s.label === 'Image refused'));
+  });
+
+  await check('recovers from a dropped connection and a busy server by retrying', async () => {
+    seen.drops = 0;
+    for (const theme of ['FLAKY one', 'BUSY one']) {
+      const r = await api('/api/designs/run', { method: 'POST', body: JSON.stringify({ count: 1, theme }) });
+      const job = await waitFor(r.body.id);
+      assert.strictEqual(job.status, 'done', job.error);
+      assert.match(job.result, /1 of 1 design passed/);
+    }
+    assert.strictEqual(seen.drops, 1);
+  });
+
+  await check('a design whose connection keeps dropping is skipped, the run carries on', async () => {
+    const r = await api('/api/designs/run', { method: 'POST', body: JSON.stringify({ count: 2, theme: 'DEAD line' }) });
+    const job = await waitFor(r.body.id);
+    assert.strictEqual(job.status, 'done', job.error);
+    assert.match(job.result, /1 of 2 designs passed/);
+    const skipped = job.steps.find((s) => s.label === 'Skipped');
+    assert.ok(skipped, 'expected a Skipped step');
+    assert.match(skipped.detail, /Google image request failed: .*tried 4 times/);
   });
 
   await check('explains a Google permissions problem clearly', async () => {

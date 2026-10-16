@@ -156,7 +156,7 @@ async function runDesignJob(job, ctl, { addStep, checkLimits }) {
         try {
           img = await generateImage(prompt, ctl.abort.signal);
         } catch (err) {
-          if (!err.noImage) throw err; // auth, quota, network: stop the whole run
+          if (!err.noImage) throw err; // handled below: skip this design or stop the run
           design.attempts.push({ prompt, error: err.message, at: new Date().toISOString() });
           addStep(job, { kind: 'error', label: 'Image refused', detail: err.message });
           if (attempt === config.maxRevisions) break;
@@ -231,7 +231,11 @@ async function runDesignJob(job, ctl, { addStep, checkLimits }) {
       design.status = 'rejected';
       design.reason = ctl.stopped ? 'Stopped by you.' : err.message;
       store.saveDesigns();
-      throw err;
+      // A dropped connection or busy server (after retries) only loses this design;
+      // setup problems, budget limits and the stop button end the whole run.
+      const skippable = !ctl.stopped && (err.network || err.fatal === false);
+      if (!skippable) throw err;
+      addStep(job, { kind: 'error', label: 'Skipped', detail: `${brief.title}: ${err.message}` });
     }
     store.saveDesigns();
   }

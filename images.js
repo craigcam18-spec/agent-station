@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
 const config = require('./config');
+const { fetchJson } = require('./net');
 
 // USD per image by size. https://cloud.google.com/vertex-ai/generative-ai/pricing
 const IMAGE_PRICES = {
@@ -62,20 +63,28 @@ function explainGoogleError(status, message) {
 async function generateImage(prompt, signal) {
   const [token, project] = await Promise.all([googleToken(), googleProject()]);
   const url = `${config.googleApiBase}/v1/projects/${project}/locations/global/publishers/google/models/${config.imageModel}:generateContent`;
-  const res = await fetch(url, {
-    method: 'POST',
-    signal,
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseModalities: ['TEXT', 'IMAGE'],
-        imageConfig: { aspectRatio: config.imageAspect, imageSize: config.imageSize },
-      },
-    }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(explainGoogleError(res.status, data?.error?.message || res.statusText));
+  const res = await fetchJson(
+    url,
+    {
+      method: 'POST',
+      signal,
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseModalities: ['TEXT', 'IMAGE'],
+          imageConfig: { aspectRatio: config.imageAspect, imageSize: config.imageSize },
+        },
+      }),
+    },
+    { label: 'Google image request', timeoutMs: 240000 }
+  );
+  const data = res.data;
+  if (!res.ok) {
+    const err = new Error(explainGoogleError(res.status, data?.error?.message || res.statusText));
+    err.fatal = [400, 401, 403, 404].includes(res.status);
+    throw err;
+  }
 
   const parts = data.candidates?.[0]?.content?.parts || [];
   const img = parts.find((p) => p.inlineData?.data);

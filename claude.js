@@ -1,6 +1,7 @@
 'use strict';
 // Shared helpers for calling the Claude API and adding up what it costs.
 const config = require('./config');
+const { fetchJson } = require('./net');
 
 async function callClaude({ system, messages, tools, toolChoice, maxTokens, signal }) {
   const body = {
@@ -12,19 +13,26 @@ async function callClaude({ system, messages, tools, toolChoice, maxTokens, sign
   if (tools && tools.length) body.tools = tools;
   if (toolChoice) body.tool_choice = toolChoice;
 
-  const res = await fetch(`${config.baseUrl}/v1/messages`, {
-    method: 'POST',
-    signal,
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': config.apiKey,
-      'anthropic-version': '2023-06-01',
+  const res = await fetchJson(
+    `${config.baseUrl}/v1/messages`,
+    {
+      method: 'POST',
+      signal,
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': config.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`Claude API error ${res.status}: ${data?.error?.message || res.statusText}`);
-  return data;
+    { label: 'Claude API' }
+  );
+  if (!res.ok) {
+    const err = new Error(`Claude API error ${res.status}: ${res.data?.error?.message || res.statusText}`);
+    err.fatal = [400, 401, 403, 404].includes(res.status); // a setup problem: retrying other designs won't help
+    throw err;
+  }
+  return res.data;
 }
 
 // Adds a reply's token usage (and any web searches) to a job's running totals.
