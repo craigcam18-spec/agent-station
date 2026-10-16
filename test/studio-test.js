@@ -55,8 +55,16 @@ const seen = { judgeImages: [], googleAuth: [], revisions: 0 };
 
       if (req.url === '/v1/messages') {
         const r = JSON.parse(body);
-        const tool = r.tool_choice?.name;
+        // Behave like newer Claude models: forced tool choice is refused.
+        if (r.tool_choice && ['tool', 'any'].includes(r.tool_choice.type))
+          return json(400, { error: { message: 'tool_choice: type "tool" and "any" are not supported for this model.' } });
+        const tool = r.tools?.[0]?.name;
         const usage = { input_tokens: 2000, output_tokens: 300 };
+        // The first designer call answers in plain text, to check the nudge-and-retry.
+        if (tool === 'submit_briefs' && r.messages.length === 1 && !seen.textedOnce) {
+          seen.textedOnce = true;
+          return json(200, { content: [{ type: 'text', text: 'Here are some ideas…' }], stop_reason: 'end_turn', usage });
+        }
         const reply = (input) =>
           json(200, { content: [{ type: 'tool_use', id: 'tu', name: tool, input }], stop_reason: 'tool_use', usage });
         const text = JSON.stringify(r.messages);
@@ -154,6 +162,7 @@ const seen = { judgeImages: [], googleAuth: [], revisions: 0 };
     assert.ok(runJob.claudeUsd > 0);
     assert.ok(Math.abs(runJob.costUsd - (runJob.imageUsd + runJob.claudeUsd)) < 1e-9);
     assert.strictEqual(seen.revisions, 1);
+    assert.ok(seen.textedOnce, 'designer plain-text reply should have been retried');
     assert.ok(seen.judgeImages.every((n) => n === 2), 'judge should get full view + crop');
     assert.ok(seen.googleAuth.every((a) => a === 'Bearer tok-123'));
   });

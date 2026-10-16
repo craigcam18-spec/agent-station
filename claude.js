@@ -45,20 +45,25 @@ function addUsage(job, usage = {}) {
   job.costUsd += cost;
 }
 
-// Forces Claude to answer through one tool and returns that tool's input.
+// Asks Claude to answer through one tool and returns that tool's input.
+// Newer models don't accept a forced tool_choice, so we ask in the prompt and
+// nudge once if the reply comes back as plain text instead.
 async function callForTool(job, { system, messages, tool, signal, maxTokens }) {
-  const reply = await callClaude({
-    system,
-    messages,
-    tools: [tool],
-    toolChoice: { type: 'tool', name: tool.name },
-    maxTokens,
-    signal,
-  });
-  addUsage(job, reply.usage);
-  const use = (reply.content || []).find((b) => b.type === 'tool_use' && b.name === tool.name);
-  if (!use) throw new Error(`Claude did not return ${tool.name}.`);
-  return use.input;
+  const sys = `${system}\n\nAlways give your answer by calling the ${tool.name} tool. Do not answer in plain text.`;
+  let convo = [...messages];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const reply = await callClaude({ system: sys, messages: convo, tools: [tool], maxTokens, signal });
+    addUsage(job, reply.usage);
+    const content = reply.content || [];
+    const use = content.find((b) => b.type === 'tool_use' && b.name === tool.name);
+    if (use) return use.input;
+    convo = [
+      ...convo,
+      { role: 'assistant', content: content.length ? content : [{ type: 'text', text: '(no answer)' }] },
+      { role: 'user', content: `Please give that answer now by calling the ${tool.name} tool.` },
+    ];
+  }
+  throw new Error(`Claude did not return ${tool.name}.`);
 }
 
 module.exports = { callClaude, addUsage, callForTool };
